@@ -1,9 +1,8 @@
-package main
+package registry
 
 import (
 	"crypto/sha256"
 	_ "embed"
-	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -14,34 +13,29 @@ import (
 const digestHeader = "docker-content-digest"
 
 var (
-	addr = flag.String("addr", ":80", "address to serve on")
-)
-
-var (
 	//go:embed manifest.json
 	manifest       []byte
-	manifestDigest string
+	ManifestDigest string
 	//go:embed blob.tar.gz
 	blob       []byte
-	blobDigest string
+	BlobDigest string
 	//go:embed config.json
 	config       []byte
-	configDigest string
+	ConfigDigest string
 )
 
 func digest(data []byte) string {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(data))
-
 }
 
 func init() {
-	manifestDigest = digest(manifest)
-	blobDigest = digest(blob)
-	configDigest = digest(config)
+	ManifestDigest = digest(manifest)
+	BlobDigest = digest(blob)
+	ConfigDigest = digest(config)
 }
 
 func manifestHandler(rw http.ResponseWriter, req *http.Request) {
-	respDigest := manifestDigest
+	respDigest := ManifestDigest
 	if reqDigest := req.PathValue("digest"); strings.HasPrefix(reqDigest, "sha256:") {
 		respDigest = reqDigest
 	}
@@ -52,22 +46,26 @@ func manifestHandler(rw http.ResponseWriter, req *http.Request) {
 
 func blobHandler(rw http.ResponseWriter, req *http.Request) {
 	switch req.PathValue("digest") {
-	case configDigest:
-    rw.Header().Set(digestHeader, configDigest)
+	case ConfigDigest:
+		rw.Header().Set(digestHeader, ConfigDigest)
 		rw.Write(config)
-	case blobDigest:
-    rw.Header().Set(digestHeader, blobDigest)
+	case BlobDigest:
+		rw.Header().Set(digestHeader, BlobDigest)
 		rw.Write(blob)
 	default:
 		rw.WriteHeader(http.StatusNotFound)
 	}
 }
 
-func main() {
-	flag.Parse()
+func v2Handler(rw http.ResponseWriter, _ *http.Request) {
+	rw.Header().Set("Docker-Distribution-API-Version", "registry/2.0")
+	rw.WriteHeader(http.StatusOK)
+}
 
+func Run(addr *string) {
 	http.DefaultServeMux.Handle("/v2/busybox/manifests/{digest}", http.HandlerFunc(manifestHandler))
 	http.DefaultServeMux.Handle("/v2/busybox/blobs/{digest}", http.HandlerFunc(blobHandler))
+	http.DefaultServeMux.Handle("/v2/", http.HandlerFunc(v2Handler))
 
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
